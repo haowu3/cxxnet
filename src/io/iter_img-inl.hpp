@@ -25,6 +25,7 @@ public:
     shuffle_ = 0;
     data_index_ = 0;
     label_width_ = 1;
+    as_grey_ = 0;
   }
   virtual ~ImageIterator(void) {
     if(fplst_ != NULL) fclose(fplst_);
@@ -35,6 +36,8 @@ public:
     if(!strcmp(name, "silent"  ))  silent_ = atoi(val);
     if(!strcmp(name, "shuffle"  ))  shuffle_ = atoi(val);
     if(!strcmp(name, "label_width"  ))  label_width_ = atoi(val);
+    if(!strcmp(name, "as_grey"  ))  as_grey_ = atoi(val);
+
   }
   virtual void Init(void) {
     fplst_  = utils::FopenCheck(path_imglst_.c_str(), "r");
@@ -70,11 +73,11 @@ public:
     if (data_index_ < static_cast<int>(order_.size())) {
       size_t index = order_[data_index_];
       if (path_imgdir_.length() == 0) {
-        LoadImage(img_, out_, filenames_[index].c_str());
+        LoadImage(img_, out_, filenames_[index].c_str(), as_grey_);
       } else {
         char sname[256];
         sprintf(sname, "%s%s", path_imgdir_.c_str(), filenames_[index].c_str());
-        LoadImage(img_, out_, sname);
+        LoadImage(img_, out_, sname, as_grey_);
       }
       out_.index = index_list_[index];
       mshadow::Tensor<cpu, 1> label_(&(labels_[0]) + label_width_ * index,
@@ -92,16 +95,39 @@ protected:
   inline static void LoadImage(mshadow::TensorContainer<cpu,3> &img, 
           DataInst &out,
           const char *fname) {
-    cv::Mat res = cv::imread(fname);
+    LoadImage(img, out, fname, 0);
+  }
+  
+  inline static void LoadImage(mshadow::TensorContainer<cpu,3> &img, 
+          DataInst &out,
+          const char *fname, int as_grey_) {
+    cv::Mat res;
+
+    if (as_grey_) {
+      res = cv::imread(fname, CV_LOAD_IMAGE_GRAYSCALE);
+    } else {
+      res = cv::imread(fname);
+    }
     CHECK(res.data != NULL) << "LoadImage: Reading image" << fname << "failed.";
-    img.Resize(mshadow::Shape3(3, res.rows, res.cols));
-    for(index_t y = 0; y < img.size(1); ++y) {
-      for(index_t x = 0; x < img.size(2); ++x) {
-        cv::Vec3b bgr = res.at<cv::Vec3b>(y, x);
-        // store in RGB order
-        img[2][y][x] = bgr[0];
-        img[1][y][x] = bgr[1];
-        img[0][y][x] = bgr[2];
+
+    if (as_grey_) {
+      img.Resize(mshadow::Shape3(1, res.rows, res.cols));
+      for(index_t y = 0; y < img.size(1); ++y) {
+        for(index_t x = 0; x < img.size(2); ++x) {
+          img[0][y][x] = res.at<uchar>(y, x);
+        }
+      }
+    }
+    else {
+      img.Resize(mshadow::Shape3(3, res.rows, res.cols));
+      for(index_t y = 0; y < img.size(1); ++y) {
+        for(index_t x = 0; x < img.size(2); ++x) {
+          cv::Vec3b bgr = res.at<cv::Vec3b>(y, x);
+          // store in RGB order
+          img[2][y][x] = bgr[0];
+          img[1][y][x] = bgr[1];
+          img[0][y][x] = bgr[2];
+        }
       }
     }
     out.data = img;
@@ -125,6 +151,8 @@ protected:
   int label_width_;
   // denotes the current data index
   int data_index_;
+  // forces to load images as grey scale
+  int as_grey_;
   // stores the reading orders
   std::vector<int> order_;
   // stores the labels of data
