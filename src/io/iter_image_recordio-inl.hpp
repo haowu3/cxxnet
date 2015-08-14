@@ -163,6 +163,8 @@ class ImageRecordIOParser {
   dmlc::InputSplit *source_;
   /*! \brief label information, if any */
   ImageLabelMap *label_map_;
+  /*! \brief forces to load images as grey */
+  int as_grey_;
 };
 
 inline void ImageRecordIOParser::Init(void) {
@@ -210,6 +212,9 @@ SetParam(const char *name, const char *val) {
   if (!strcmp(name, "label_width")) {
     label_width_ = atoi(val);
   }
+  if (!strcmp(name, "as_grey")) {
+    as_grey_ = atoi(val);
+  }
 }
 
 inline bool ImageRecordIOParser::
@@ -233,18 +238,36 @@ ParseNext(std::vector<InstVector> *out_vec) {
       cv::Mat res;
       rec.Load(blob.dptr, blob.size);
       cv::Mat buf(1, rec.content_size, CV_8U, rec.content);
-      res = cv::imdecode(buf, 1);
+      if (as_grey_ == 1) {
+        res = cv::imdecode(buf, CV_LOAD_IMAGE_GRAYSCALE);
+      } else {
+        res = cv::imdecode(buf, 1);
+      }
       res = augmenters_[tid]->Process(res, prnds_[tid]);
-      out.Push(static_cast<unsigned>(rec.image_index()),
-               mshadow::Shape3(3, res.rows, res.cols),
-               mshadow::Shape1(label_width_));
+      if (as_grey_ == 1) {
+        out.Push(static_cast<unsigned>(rec.image_index()),
+                 mshadow::Shape3(1, res.rows, res.cols),
+                 mshadow::Shape1(label_width_));
+      } else {
+        out.Push(static_cast<unsigned>(rec.image_index()),
+                 mshadow::Shape3(3, res.rows, res.cols),
+                 mshadow::Shape1(label_width_));        
+      }
       DataInst inst = out.Back();
-      for (int i = 0; i < res.rows; ++i) {
-        for (int j = 0; j < res.cols; ++j) {
-          cv::Vec3b bgr = res.at<cv::Vec3b>(i, j);
-          inst.data[0][i][j] = bgr[2];
-          inst.data[1][i][j] = bgr[1];
-          inst.data[2][i][j] = bgr[0];
+      if (as_grey_ == 1) {
+        for (int i = 0; i < res.rows; ++i) {
+          for (int j = 0; j < res.cols; ++j) {
+            inst.data[0][i][j] = res.at<uchar>(i, j);
+          }
+        }      
+      } else {
+        for (int i = 0; i < res.rows; ++i) {
+          for (int j = 0; j < res.cols; ++j) {
+            cv::Vec3b bgr = res.at<cv::Vec3b>(i, j);
+            inst.data[0][i][j] = bgr[2];
+            inst.data[1][i][j] = bgr[1];
+            inst.data[2][i][j] = bgr[0];
+          }
         }
       }
       if (label_map_ != NULL) {
